@@ -36,7 +36,7 @@ button:disabled{background:#b5aca0;border-color:#b5aca0;color:#fff;cursor:not-al
 <pre id="text"></pre>
 </main>
 <script>
-// 메일의 빠른 공유 링크가 여는 화면. 내용은 Apps Script에서 쿠키 없이 가져온다(gas/Share.html과 같은 화면).
+// 메일의 빠른 공유 링크가 여는 화면. 내용은 Apps Script에서 쿠키 없이 가져온다(share-page/build.js가 gas/Share.html로 만든다).
 var EXEC = "https://script.google.com/macros/s/AKfycbyAR6PVR775Q4dgldYSZVTnhahDTtB_YA6MhrxNroNFVftpXQFrnyMYsxsrsS_rqx67/exec";
 var Q = new URLSearchParams(location.search), REQ = { t: Q.get("t") || "", s: Q.get("s") || "" };
 var NAME = { sun: "주일 예배", wed: "수요 예배", fri: "금요전도학교" }, PART = REQ.t.split(" ");
@@ -105,12 +105,26 @@ function share() {
 $('share').textContent = REQ.title + ' 전체 텍스트 공유하기';
 $('share').onclick = share;
 $('copy').onclick = copy;
+// 지난번에 본 글을 먼저 보여 주고, 최신 글이 오면 바꾼다. 버튼은 최신 글이 온 뒤에 켠다(지난 글을 보내지 않게).
+// 악보 사진은 따로 받아, 주일은 사진까지 와야 공유하기를 켠다.
+var MEMO = 'ym share ' + REQ.t, gotText = false, gotScores = REQ.t.indexOf('sun ') !== 0;
+try { var memo = localStorage.getItem(MEMO); if (memo) { $('text').textContent = memo; msg('최신 내용을 확인하는 중입니다.'); } } catch (e) {}
+function ready() {
+  $('copy').disabled = !gotText || !full;
+  $('share').disabled = !gotText || !full || !gotScores;
+  if (gotText && full && !gotScores) msg('악보 사진을 불러오는 중입니다. 복사하기는 지금 쓸 수 있습니다.');
+  else if (gotText && full && $('msg').className === '') msg('');
+}
 api({ action: 'read' }).then(function (o) {
-  full = o.full; scores = o.scores || [];
+  full = o.full; gotText = true;
   putSent(o.sent);
-  if (!full) return msg('아직 올라온 내용이 없습니다.', 'err');
-  msg('');
+  try { if (full) localStorage.setItem(MEMO, full); } catch (e) {}
   $('text').textContent = full;
+  if (!full) return msg('아직 올라온 내용이 없습니다.', 'err');
+  ready();
+}).catch(function (e) { msg('불러오지 못했습니다: ' + e.message, 'err'); });
+if (!gotScores) api({ action: 'scores' }).then(function (o) {
+  scores = o.scores || [];
   if (scores.length) {
     $('note').textContent = '공유하기를 누르면 악보 사진 ' + scores.length + '장도 함께 보냅니다.';
     scores.forEach(function (s) {
@@ -119,8 +133,9 @@ api({ action: 'read' }).then(function (o) {
       $('scores').appendChild(img);
     });
   }
-  $('share').disabled = $('copy').disabled = false;
-}).catch(function (e) { msg('불러오지 못했습니다: ' + e.message, 'err'); });
+}).catch(function () {
+  $('note').textContent = '악보 사진을 불러오지 못해 글만 공유합니다.';
+}).then(function () { gotScores = true; ready(); });
 </script>
 </body>
 </html>

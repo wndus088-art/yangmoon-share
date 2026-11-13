@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>전체 텍스트 공유</title>
+<style>
+:root{--ink:#1d1816;--sub:#5f5349;--line:#d8d0c2;--point:#7c2d3a;--bg:#f7f3ec;--ok:#2f6b45;--bad:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
+button{font:inherit;width:100%;padding:16px;border:0;border-radius:8px;background:var(--point);color:#fff;font-weight:700;font-size:18px;cursor:pointer}
+button.sub{margin-top:10px;padding:12px;background:#fff;color:var(--point);border:1px solid var(--point);font-size:16px}
+button:disabled{background:#b5aca0;border-color:#b5aca0;color:#fff;cursor:not-allowed}
+#sent{margin:10px 0 0;text-align:center;color:var(--sub);font-size:14px}
+#sent:empty,#msg:empty,#note:empty{display:none}
+#sent .prev{color:var(--bad)}
+#msg{margin:10px 0 0;font-weight:700}
+#note{margin:14px 0 0;color:var(--sub);font-size:14px}
+.scores{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.scores img{width:88px;height:88px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff}
+#text{margin:10px 0 0;padding:14px;border:1px solid var(--line);border-radius:8px;background:#fff;white-space:pre-wrap;word-break:break-word;font:inherit;font-size:15px}
+.good{color:var(--ok)}
+.err{color:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+<button id="share" disabled>전체 텍스트 공유하기</button>
+<button id="copy" class="sub" disabled>복사하기</button>
+<p id="sent"></p>
+<p id="msg" role="status">불러오는 중입니다.</p>
+<p id="note"></p>
+<div id="scores" class="scores"></div>
+<pre id="text"></pre>
+</main>
+<script>
+// 메일의 빠른 공유 링크가 여는 화면. 내용은 Apps Script에서 쿠키 없이 가져온다(gas/Share.html과 같은 화면).
+var EXEC = "https://script.google.com/macros/s/AKfycbyAR6PVR775Q4dgldYSZVTnhahDTtB_YA6MhrxNroNFVftpXQFrnyMYsxsrsS_rqx67/exec";
+var Q = new URLSearchParams(location.search), REQ = { t: Q.get("t") || "", s: Q.get("s") || "" };
+var NAME = { sun: "주일 예배", wed: "수요 예배", fri: "금요전도학교" }, PART = REQ.t.split(" ");
+REQ.title = /^[0-9]{8}$/.test(PART[1] || "") && NAME[PART[0]] ? PART[1].slice(2, 4) + "/" + PART[1].slice(4, 6) + "/" + PART[1].slice(6) + " " + NAME[PART[0]] : "";
+document.title = REQ.title ? REQ.title + " 전체 텍스트 공유" : "전체 텍스트 공유";
+var $ = function (id) { return document.getElementById(id); };
+var full = '', scores = [];
+function api(o) {
+  o.api = "share"; o.t = REQ.t; o.s = REQ.s;
+  return fetch(EXEC + "?" + new URLSearchParams(o), { credentials: "omit" })
+    .then(function (r) { return r.json(); })
+    .then(function (r) { if (!r.ok) throw new Error(r.error); return r; });
+}
+function msg(text, cls) { $('msg').className = cls || ''; $('msg').textContent = text; }
+// 지난 예배 때 한 복사·공유(prev)는 빨갛게 보여 이번 것은 아직이라는 걸 알린다
+function putSent(s) {
+  var el = $('sent'), first = true;
+  el.textContent = '';
+  [['copy', '최근 복사: '], ['share', '최근 공유: ']].forEach(function (h) {
+    if (!s || !s[h[0]]) return;
+    if (!first) el.appendChild(document.createTextNode(' · '));
+    var span = document.createElement('span');
+    span.textContent = h[1] + s[h[0]];
+    if ((s.prev || []).indexOf(h[0]) >= 0) span.className = 'prev';
+    el.appendChild(span);
+    first = false;
+  });
+}
+function mark(how) { api({ action: 'mark', how: how }).then(function (o) { putSent(o.sent); }).catch(function () {}); }
+function blobOf(s) {
+  var bin = atob(s.data), a = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return new File([a], s.name, { type: s.type });
+}
+function copy() {
+  var t = document.createElement('textarea'), ok = false;
+  t.value = full; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+  document.body.appendChild(t);
+  t.select(); t.setSelectionRange(0, full.length);
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  t.remove();
+  if (ok) { mark('copy'); msg('복사했습니다. 카카오톡에 붙여 넣으세요.', 'good'); }
+  else msg('복사하지 못했습니다. 아래 글을 길게 눌러 전체 선택 후 복사해 주세요.', 'err');
+  return ok;
+}
+// 휴대폰 공유 창을 열어 카카오톡을 고르게 한다. 공유 창이 없는 기기는 복사로 대신한다.
+function share() {
+  if (!navigator.share) {
+    if (copy()) msg('이 기기에서는 공유하기를 쓸 수 없어 복사했습니다. 카카오톡에 붙여 넣으세요.', 'good');
+    return;
+  }
+  var data = { text: full }, files = scores.map(blobOf);
+  // 사진과 글을 함께 받지 못하는 앱이 있어 글은 미리 복사해 둔다
+  if (files.length && navigator.canShare && navigator.canShare({ text: full, files: files })) {
+    data.files = files;
+    if (navigator.clipboard) navigator.clipboard.writeText(full).catch(function () {});
+  }
+  navigator.share(data).then(function () {
+    mark('share');
+    msg(data.files ? '악보와 함께 공유했습니다. 카카오톡에 사진만 갔다면 글을 붙여 넣으세요(복사해 두었습니다).' : '공유했습니다.', 'good');
+  }).catch(function (e) {
+    if (e && e.name === 'AbortError') return;
+    if (copy()) msg('공유 창을 열지 못해 복사했습니다. 카카오톡에 붙여 넣으세요.', 'good');
+  });
+}
+$('share').textContent = REQ.title + ' 전체 텍스트 공유하기';
+$('share').onclick = share;
+$('copy').onclick = copy;
+api({ action: 'read' }).then(function (o) {
+  full = o.full; scores = o.scores || [];
+  putSent(o.sent);
+  if (!full) return msg('아직 올라온 내용이 없습니다.', 'err');
+  msg('');
+  $('text').textContent = full;
+  if (scores.length) {
+    $('note').textContent = '공유하기를 누르면 악보 사진 ' + scores.length + '장도 함께 보냅니다.';
+    scores.forEach(function (s) {
+      var img = document.createElement('img');
+      img.src = 'data:' + s.type + ';base64,' + s.data; img.alt = '악보';
+      $('scores').appendChild(img);
+    });
+  }
+  $('share').disabled = $('copy').disabled = false;
+}).catch(function (e) { msg('불러오지 못했습니다: ' + e.message, 'err'); });
+</script>
+</body>
+</html>

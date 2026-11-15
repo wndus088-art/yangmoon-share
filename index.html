@@ -21,6 +21,11 @@ button:disabled{background:#b5aca0;border-color:#b5aca0;color:#fff;cursor:not-al
 .scores{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .scores img{width:88px;height:88px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff}
 #text{margin:10px 0 0;padding:14px;border:1px solid var(--line);border-radius:8px;background:#fff;white-space:pre-wrap;word-break:break-word;font:inherit;font-size:15px}
+/* 화면에서만 칠한다: 고친 곳은 파랑, 없는 성경 구절은 빨강. 공유·복사하는 글에는 색이 없다 */
+.ed{background:#dbeafe;color:#1e3a8a}
+.bad{color:var(--bad);font-weight:700;text-decoration:underline wavy var(--bad)}
+#legend{margin:10px 0 0;color:var(--sub);font-size:13px}
+#legend:empty{display:none}
 .good{color:var(--ok)}
 .err{color:var(--bad)}
 </style>
@@ -33,6 +38,7 @@ button:disabled{background:#b5aca0;border-color:#b5aca0;color:#fff;cursor:not-al
 <p id="msg" role="status">불러오는 중입니다.</p>
 <p id="note"></p>
 <div id="scores" class="scores"></div>
+<p id="legend"></p>
 <pre id="text"></pre>
 </main>
 <script>
@@ -64,6 +70,27 @@ function putSent(s) {
     el.appendChild(span);
     first = false;
   });
+}
+// 글을 칠한 곳(marks: {s, e, c})대로 나눠 넣는다. 겹치면 두 색을 함께 쓴다.
+function paint(el, text, marks) {
+  el.textContent = '';
+  var cut = [0, text.length];
+  (marks || []).forEach(function (m) { cut.push(m.s, m.e); });
+  cut = cut.filter(function (x, i, a) { return x >= 0 && x <= text.length && a.indexOf(x) === i; }).sort(function (a, b) { return a - b; });
+  for (var i = 0; i < cut.length - 1; i++) {
+    var a = cut[i], b = cut[i + 1], cls = [];
+    (marks || []).forEach(function (m) { if (m.s <= a && m.e >= b && cls.indexOf(m.c) < 0) cls.push(m.c); });
+    var part = text.slice(a, b);
+    if (!cls.length) { el.appendChild(document.createTextNode(part)); continue; }
+    var span = document.createElement('span');
+    span.className = cls.join(' ');
+    span.textContent = part;
+    el.appendChild(span);
+  }
+  var has = function (c) { return (marks || []).some(function (m) { return m.c === c; }); }, t = [];
+  if (has('ed')) t.push('파란색: 처음 올린 뒤 고친 부분');
+  if (has('bad')) t.push('빨간색: 없는 성경 구절');
+  $('legend').textContent = t.length ? t.join(' · ') + ' (공유·복사하는 글에는 색이 없습니다)' : '';
 }
 function mark(how) { api({ action: 'mark', how: how }).then(function (o) { putSent(o.sent); }).catch(function () {}); }
 function blobOf(s) {
@@ -119,7 +146,7 @@ api({ action: 'read' }).then(function (o) {
   full = o.full; gotText = true;
   putSent(o.sent);
   try { if (full) localStorage.setItem(MEMO, full); } catch (e) {}
-  $('text').textContent = full;
+  paint($('text'), full, o.marks);
   if (!full) return msg('아직 올라온 내용이 없습니다.', 'err');
   ready();
 }).catch(function (e) { msg('불러오지 못했습니다: ' + e.message, 'err'); });
